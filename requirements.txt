@@ -1,0 +1,7 @@
+# Shopee Reconciliation Demo — Python dependencies
+polars>=1.0.0
+fastexcel>=0.11.0
+xlsxwriter>=3.1.0
+streamlit>=1.35.0
+pandas>=2.0.0
+openpyxl>=3.1.0

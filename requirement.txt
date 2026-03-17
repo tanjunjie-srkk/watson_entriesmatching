@@ -1,0 +1,6 @@
+pip install fastexcel
+pip install polars openpyxl
+pip install xlsxwriter
+pip install pandas
+pip install pyarrow
+from pathlib import Path

@@ -8,6 +8,9 @@ Run from the project root:
 """
 from __future__ import annotations
 
+import datetime
+import hashlib
+import random
 import sys
 import time
 from pathlib import Path
@@ -41,6 +44,83 @@ CARD_BG     = "#FFFFFF"
 TEXT_PRIMARY = "#1A1A2E"
 TEXT_MUTED   = "#6B7280"
 BORDER       = "#E5E7EB"
+AMBER        = "#F59E0B"
+GREEN        = "#10B981"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Mock data for Reconciliation Summary (POC)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@st.cache_data
+def _generate_mock_runs() -> pd.DataFrame:
+    """Generate realistic mock reconciliation run history."""
+    rng = random.Random(42)
+    runs = []
+    base_date = datetime.date(2025, 10, 1)
+    for i in range(25):
+        run_date = base_date + datetime.timedelta(days=i * 7 + rng.randint(0, 3))
+        period_from = run_date - datetime.timedelta(days=7)
+        period_to = run_date - datetime.timedelta(days=1)
+        income_rows = rng.randint(800, 5000)
+        balance_rows = rng.randint(800, 5000)
+        sales_rows = rng.randint(200, 1500)
+        recon_rows = rng.randint(700, min(income_rows, balance_rows))
+        # Force some runs to have zero outstanding so they show as OK
+        if i % 3 == 0:  # roughly 1 in 3 runs have zero outstanding
+            outstanding_rows = 0
+        else:
+            outstanding_rows = rng.randint(1, int(recon_rows * 0.15))
+        refund_rows = rng.randint(0, int(recon_rows * 0.08))
+        match_rate = round((recon_rows - outstanding_rows) / recon_rows * 100, 2) if recon_rows else 0
+        total_sales = round(rng.uniform(50_000, 500_000), 2)
+        total_fees = round(total_sales * rng.uniform(0.03, 0.12), 2)
+        if i % 3 == 0:
+            # OK case: payment covers sales minus fees exactly → zero outstanding
+            total_payment = round(total_sales - total_fees, 2)
+            total_outstanding = 0.0
+        else:
+            total_payment = round(total_sales * rng.uniform(0.85, 0.98), 2)
+            total_outstanding = round(total_sales - total_payment - total_fees, 2)
+        income_not_balance = rng.randint(0, 30)
+        balance_not_income = rng.randint(0, 25)
+        duration = round(rng.uniform(3.5, 45.0), 2)
+        fees_pct = round(total_fees / total_sales * 100, 2) if total_sales else 0
+
+        # Flag for human review when outstanding is not zero
+        needs_review = outstanding_rows != 0 or total_outstanding != 0
+        review_reasons = []
+        if outstanding_rows != 0:
+            review_reasons.append(f"Outstanding orders ({outstanding_rows})")
+        if total_outstanding != 0:
+            review_reasons.append(f"Outstanding amount (RM {total_outstanding:,.2f})")
+
+        run_id = hashlib.sha256(f"run-{i}-{run_date}".encode()).hexdigest()[:8].upper()
+        runs.append({
+            "Run ID": f"RUN-{run_id}",
+            "Run Date": run_date,
+            "Period From": period_from,
+            "Period To": period_to,
+            "Income Rows": income_rows,
+            "Balance Rows": balance_rows,
+            "Sales Rows": sales_rows,
+            "Recon Rows": recon_rows,
+            "Outstanding Orders": outstanding_rows,
+            "Refund Orders": refund_rows,
+            "Match Rate (%)": match_rate,
+            "Total Sales (RM)": total_sales,
+            "Total Payment (RM)": total_payment,
+            "Total Fees (RM)": total_fees,
+            "Total Outstanding (RM)": total_outstanding,
+            "Income Not In Balance": income_not_balance,
+            "Balance Not In Income": balance_not_income,
+            "Duration (s)": duration,
+            "Fees % of Sales": fees_pct,
+            "Needs Review": needs_review,
+            "Review Reasons": "; ".join(review_reasons) if review_reasons else "—",
+            "Status": "⚠️ Needs Review" if needs_review else "✅ OK",
+        })
+    return pd.DataFrame(runs)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Page config & CSS
@@ -65,14 +145,82 @@ st.markdown(f"""
         color: #E8E0FF !important;
     }}
     section[data-testid="stSidebar"] .stTextInput label,
-    section[data-testid="stSidebar"] .stCheckbox label {{
+    section[data-testid="stSidebar"] .stCheckbox label,
+    section[data-testid="stSidebar"] .stDateInput label,
+    section[data-testid="stSidebar"] .stSelectbox label {{
         color: #C4B5FD !important;
     }}
-    section[data-testid="stSidebar"] .stTextInput input {{
-        background-color: rgba(191,178,249,0.15) !important;
+    section[data-testid="stSidebar"] .stTextInput input,
+    section[data-testid="stSidebar"] .stDateInput input {{
+        background-color: rgba(0,40,50,0.6) !important;
         border: 1px solid rgba(191,178,249,0.3) !important;
-        color: #004D55 !important;
+        color: #FFFFFF !important;
         border-radius: 8px;
+    }}
+    section[data-testid="stSidebar"] .stTextInput input::selection,
+    section[data-testid="stSidebar"] .stDateInput input::selection {{
+        background-color: rgba(191,178,249,0.4) !important;
+        color: #FFFFFF !important;
+    }}
+    /* Radio buttons in sidebar */
+    section[data-testid="stSidebar"] div.stRadio > div {{
+        background: rgba(255,255,255,0.08) !important;
+        border: 1px solid rgba(191,178,249,0.25) !important;
+        border-radius: 10px !important;
+        padding: 4px !important;
+        display: inline-flex !important;
+        flex-direction: column !important;
+        width: auto !important;
+    }}
+    section[data-testid="stSidebar"] div.stRadio > div > label {{
+        color: #E8E0FF !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+    }}
+    section[data-testid="stSidebar"] div.stRadio > div > label:hover {{
+        background: rgba(255,255,255,0.15) !important;
+        color: #FFFFFF !important;
+    }}
+    section[data-testid="stSidebar"] div.stRadio > div > label[data-checked="true"],
+    section[data-testid="stSidebar"] div.stRadio > div > label:has(input:checked) {{
+        background: rgba(255,255,255,0.2) !important;
+        color: #FFFFFF !important;
+    }}
+    /* Selectbox in sidebar */
+    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"],
+    section[data-testid="stSidebar"] .stSelectbox > div > div {{
+        background-color: rgba(0,40,50,0.6) !important;
+        border: 1px solid rgba(191,178,249,0.3) !important;
+        border-radius: 8px !important;
+    }}
+    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] *,
+    section[data-testid="stSidebar"] .stSelectbox span,
+    section[data-testid="stSidebar"] .stSelectbox div {{
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+    }}
+    section[data-testid="stSidebar"] .stSelectbox svg {{
+        fill: #E8E0FF !important;
+    }}
+    section[data-testid="stSidebar"] div[data-baseweb="select"] [data-baseweb="tag"] {{
+        background-color: rgba(191,178,249,0.25) !important;
+    }}
+    /* Selectbox dropdown menu (rendered at body level) */
+    div[data-baseweb="popover"] ul[role="listbox"] {{
+        background-color: #004D55 !important;
+    }}
+    div[data-baseweb="popover"] li[role="option"] {{
+        color: #1A1A2E !important;
+        -webkit-text-fill-color: #1A1A2E !important;
+    }}
+    div[data-baseweb="popover"] li[role="option"]:hover,
+    div[data-baseweb="popover"] li[role="option"][aria-selected="true"] {{
+        background-color: rgba(191,178,249,0.2) !important;
+    }}
+    /* Headings in sidebar */
+    section[data-testid="stSidebar"] h3,
+    section[data-testid="stSidebar"] h4 {{
+        color: #FFFFFF !important;
     }}
     section[data-testid="stSidebar"] hr {{
         border-color: rgba(191,178,249,0.2) !important;
@@ -241,7 +389,7 @@ st.markdown(f"""
         color: white !important;
         box-shadow: 0 2px 8px rgba(0,163,178,0.3) !important;
     }}
-    div.stRadio > div > label:hover:not(:has(input:checked)) {{
+    section[data-testid="stMain"] div.stRadio > div > label:hover:not(:has(input:checked)) {{
         background: #F0FAFB !important;
         color: {TEXT_PRIMARY} !important;
     }}
@@ -410,6 +558,26 @@ with st.sidebar:
     st.caption("Automated Shopee payment matching engine")
     st.markdown("---")
 
+    page = st.radio(
+        "Navigation",
+        ["📊 Reconciliation Summary", "📋 Reconciliation Run"],
+        index=0,
+        label_visibility="collapsed",
+    )
+    st.markdown("---")
+
+# Defaults for Reconciliation Run page variables
+run_btn = False
+folder_exists = False
+all_found = False
+force_rerun = False
+income_paths: list[Path] = []
+balance_paths: list[Path] = []
+sales_paths: list[Path] = []
+master_recon_file: Path | None = None
+
+if page == "📋 Reconciliation Run":
+  with st.sidebar:
     folder_path = st.text_input(
         "Scenario Folder Path",
         value=r"c:\Users\TanJunJie\OneDrive - SRKK Group\Project\watson_entriesmatching\OneDrive_2026-03-09\Shopee Sample Reports (Testing)\scenario2",
@@ -473,6 +641,10 @@ with st.sidebar:
 
 if "result" not in st.session_state:
     st.session_state["result"] = None
+if "run_history" not in st.session_state:
+    st.session_state["run_history"] = []
+if "run_results" not in st.session_state:
+    st.session_state["run_results"] = {}  # Run ID -> result dict
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -504,6 +676,489 @@ _PLOTLY_LAYOUT = dict(
 )
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: Reconciliation Summary
+# ══════════════════════════════════════════════════════════════════════════════
+
+if page == "📊 Reconciliation Summary":
+    mock_df = _generate_mock_runs()
+    # Merge any live runs from session state
+    if st.session_state["run_history"]:
+        live_df = pd.DataFrame(st.session_state["run_history"])
+        mock_df = pd.concat([mock_df, live_df], ignore_index=True)
+
+    # ── Header ────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="dashboard-header">
+        <h1>Reconciliation Summary</h1>
+        <p>Aggregated view of all reconciliation runs — filter, review, and drill into any run.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Sidebar date filter ───────────────────────────────────────
+    with st.sidebar:
+        st.markdown("### Filters")
+        all_dates = mock_df["Run Date"].sort_values()
+        date_min = all_dates.min()
+        date_max = all_dates.max()
+        date_range = st.date_input(
+            "Run Date Range",
+            value=(date_min, date_max),
+            min_value=date_min,
+            max_value=date_max,
+            key="overview_date_range",
+        )
+        status_filter = st.selectbox(
+            "Review Status",
+            ["All", "⚠️ Needs Review", "✅ OK"],
+            key="overview_status_filter",
+        )
+
+    # Apply filters
+    filtered = mock_df.copy()
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+        filtered = filtered[
+            (filtered["Run Date"] >= date_range[0])
+            & (filtered["Run Date"] <= date_range[1])
+        ]
+    if status_filter != "All":
+        filtered = filtered[filtered["Status"] == status_filter]
+
+    # ── KPI Summary Cards ─────────────────────────────────────────
+    total_runs = len(filtered)
+    avg_match = filtered["Match Rate (%)"].mean() if total_runs else 0
+    total_reviewed = filtered["Needs Review"].sum()
+    total_ok = total_runs - total_reviewed
+    sum_sales = filtered["Total Sales (RM)"].sum()
+    sum_payment = filtered["Total Payment (RM)"].sum()
+    sum_outstanding = filtered["Total Outstanding (RM)"].sum()
+    sum_recon_rows = filtered["Recon Rows"].sum()
+    avg_duration = filtered["Duration (s)"].mean() if total_runs else 0
+
+    st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{TEAL};"></span>Dashboard Summary</div>', unsafe_allow_html=True)
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.markdown(_metric_card("Total Runs", f"{total_runs}", TEAL), unsafe_allow_html=True)
+    k2.markdown(_metric_card("Avg Match Rate", f"{avg_match:.1f}%", GREEN if avg_match >= 95 else AMBER), unsafe_allow_html=True)
+    k3.markdown(_metric_card("Needs Review", f"{int(total_reviewed)}", RED if total_reviewed else GREEN), unsafe_allow_html=True)
+    k4.markdown(_metric_card("All Clear", f"{int(total_ok)}", GREEN), unsafe_allow_html=True)
+
+    st.markdown("<div style='height:0.75rem'></div>", unsafe_allow_html=True)
+
+    k5, k6, k7, k8 = st.columns(4)
+    k5.markdown(_metric_card("Total Sales", f"RM {sum_sales:,.2f}", PURPLE), unsafe_allow_html=True)
+    k6.markdown(_metric_card("Total Payment", f"RM {sum_payment:,.2f}", TEAL), unsafe_allow_html=True)
+    k7.markdown(_metric_card("Total Outstanding", f"RM {sum_outstanding:,.2f}", RED), unsafe_allow_html=True)
+    k8.markdown(_metric_card("Avg Duration", f"{avg_duration:.1f}s", PINK), unsafe_allow_html=True)
+
+    # ── Trend Charts ──────────────────────────────────────────────
+    st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{PURPLE};"></span>Trends</div>', unsafe_allow_html=True)
+
+    trend_left, trend_right = st.columns(2)
+
+    with trend_left:
+        trend_data = filtered.sort_values("Run Date")
+        fig_trend = go.Figure()
+        fig_trend.add_trace(go.Scatter(
+            x=trend_data["Run Date"], y=trend_data["Match Rate (%)"],
+            mode="lines+markers",
+            name="Match Rate",
+            line=dict(color=TEAL, width=2.5),
+            marker=dict(size=7),
+            hovertemplate="<b>%{x}</b><br>Match Rate: %{y:.1f}%<extra></extra>",
+        ))
+        fig_trend.add_hline(y=95, line_dash="dash", line_color=GREEN,
+                            annotation_text="Target 95%", annotation_position="top left")
+        fig_trend.add_hline(y=92, line_dash="dot", line_color=RED,
+                            annotation_text="Review Threshold 92%", annotation_position="bottom left")
+        fig_trend.update_layout(
+            **_PLOTLY_LAYOUT, height=380,
+            title=dict(text="Match Rate Over Time", font=dict(size=14)),
+            yaxis=dict(range=[80, 102], showgrid=True, gridcolor="#F0F0F0", title="Match Rate (%)"),
+            xaxis=dict(showgrid=False, title="Run Date"),
+            margin=dict(l=50, r=20, t=50, b=50),
+        )
+        st.plotly_chart(fig_trend, use_container_width=True, config={"displayModeBar": False})
+
+    with trend_right:
+        fig_vol = go.Figure()
+        fig_vol.add_trace(go.Bar(
+            x=trend_data["Run Date"], y=trend_data["Total Sales (RM)"],
+            name="Sales", marker=dict(color=PURPLE, cornerradius=4),
+            hovertemplate="<b>%{x}</b><br>Sales: RM %{y:,.0f}<extra></extra>",
+        ))
+        fig_vol.add_trace(go.Bar(
+            x=trend_data["Run Date"], y=trend_data["Total Payment (RM)"],
+            name="Payment", marker=dict(color=TEAL, cornerradius=4),
+            hovertemplate="<b>%{x}</b><br>Payment: RM %{y:,.0f}<extra></extra>",
+        ))
+        fig_vol.update_layout(
+            **_PLOTLY_LAYOUT, height=380, barmode="group",
+            title=dict(text="Sales vs Payment Per Run", font=dict(size=14)),
+            yaxis=dict(showgrid=True, gridcolor="#F0F0F0", title="Amount (RM)"),
+            xaxis=dict(showgrid=False, title="Run Date"),
+            legend=dict(orientation="h", yanchor="top", y=-0.18, xanchor="center", x=0.5),
+            margin=dict(l=60, r=20, t=50, b=70),
+        )
+        st.plotly_chart(fig_vol, use_container_width=True, config={"displayModeBar": False})
+
+    # ── Run History Table ─────────────────────────────────────────
+    st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{PINK};"></span>Reconciliation Run History</div>', unsafe_allow_html=True)
+
+    display_cols = [
+        "Run ID", "Run Date", "Period From", "Period To", "Status",
+        "Match Rate (%)", "Recon Rows", "Outstanding Orders",
+        "Total Sales (RM)", "Total Outstanding (RM)", "Duration (s)",
+    ]
+    display_df = filtered[display_cols].sort_values("Run Date", ascending=False).reset_index(drop=True)
+
+    def _highlight_row(row):
+        if row["Status"] == "⚠️ Needs Review":
+            return ["background-color: #FEF3C7; color: #92400E;"] * len(row)
+        return [""] * len(row)
+
+    styled = display_df.style.apply(_highlight_row, axis=1).format({
+        "Match Rate (%)": "{:.2f}",
+        "Total Sales (RM)": "RM {:,.2f}",
+        "Total Outstanding (RM)": "RM {:,.2f}",
+        "Duration (s)": "{:.2f}s",
+    })
+
+    st.markdown(f"""
+    <div style="display:flex; align-items:center; gap:0.5rem; margin:0.5rem 0;">
+        <span style="background:{TEAL}; color:white; padding:0.15rem 0.6rem; border-radius:12px; font-size:0.78rem; font-weight:600;">
+            {len(display_df):,}
+        </span>
+        <span style="color:{TEXT_MUTED}; font-size:0.82rem;">runs shown</span>
+        <span style="background:{RED}; color:white; padding:0.15rem 0.6rem; border-radius:12px; font-size:0.78rem; font-weight:600; margin-left:0.5rem;">
+            {int(filtered['Needs Review'].sum())}
+        </span>
+        <span style="color:{TEXT_MUTED}; font-size:0.82rem;">need review</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.dataframe(styled, use_container_width=True, height=420)
+
+    # ── Drill-Down Detail ─────────────────────────────────────────
+    st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{TEAL};"></span>Run Detail View</div>', unsafe_allow_html=True)
+
+    run_ids = filtered.sort_values("Run Date", ascending=False)["Run ID"].tolist()
+    selected_run_id = st.selectbox("Select a run to inspect", run_ids, key="detail_run_id")
+
+    if selected_run_id:
+        run_row = filtered[filtered["Run ID"] == selected_run_id].iloc[0]
+        is_review = run_row["Needs Review"]
+
+        # ── Find previous run for period-over-period comparison ──
+        all_sorted = filtered.sort_values("Run Date", ascending=True).reset_index(drop=True)
+        current_idx = all_sorted[all_sorted["Run ID"] == selected_run_id].index[0]
+        prev_row = all_sorted.iloc[current_idx - 1] if current_idx > 0 else None
+
+        def _delta_html(current_val, prev_val, fmt=",.2f", prefix="", suffix="", invert=False):
+            """Return a small ▲/▼ delta indicator HTML string."""
+            if prev_val is None:
+                return ""
+            diff = current_val - prev_val
+            if diff == 0:
+                return f'<span style="font-size:0.72rem; color:{TEXT_MUTED}; margin-left:0.3rem;">— vs prev</span>'
+            # For metrics where higher is worse (outstanding, fees%), invert colours
+            is_up = diff > 0
+            if invert:
+                color = RED if is_up else GREEN
+            else:
+                color = GREEN if is_up else RED
+            arrow = "▲" if is_up else "▼"
+            return f'<span style="font-size:0.72rem; color:{color}; margin-left:0.3rem;">{arrow} {prefix}{abs(diff):{fmt}}{suffix} vs prev</span>'
+
+        # Detail header
+        status_color = RED if is_review else GREEN
+        status_label = run_row["Status"]
+        st.markdown(f"""
+        <div style="background:{CARD_BG}; border:2px solid {status_color}; border-radius:12px; padding:1.25rem 1.5rem; margin-bottom:1rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <span style="font-size:1.3rem; font-weight:700; color:{TEXT_PRIMARY};">{run_row['Run ID']}</span>
+                    <span style="margin-left:1rem; font-size:0.88rem; color:{TEXT_MUTED};">Run Date: {run_row['Run Date']}</span>
+                </div>
+                <div style="background:{status_color}; color:white; padding:0.3rem 1rem; border-radius:20px; font-weight:600; font-size:0.85rem;">
+                    {status_label}
+                </div>
+            </div>
+            <div style="margin-top:0.5rem; font-size:0.88rem; color:{TEXT_MUTED};">
+                Period: {run_row['Period From']} &rarr; {run_row['Period To']} &nbsp;&nbsp;|&nbsp;&nbsp; Duration: {run_row['Duration (s)']:.2f}s
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if is_review:
+            st.warning(f"**Review Reasons:** {run_row['Review Reasons']}")
+
+        # ── SECTION 1: Financial Health (the money story) ──────────
+        st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{PURPLE};"></span>Financial Health</div>', unsafe_allow_html=True)
+
+        match_rate_val = run_row["Match Rate (%)"]
+        gauge_color = TEAL if match_rate_val >= 95 else (AMBER if match_rate_val >= 92 else RED)
+        fees_pct_val = run_row.get("Fees % of Sales", 0)
+        if fees_pct_val == 0 and run_row["Total Sales (RM)"] > 0:
+            fees_pct_val = round(run_row["Total Fees (RM)"] / run_row["Total Sales (RM)"] * 100, 2)
+        fees_color = GREEN if fees_pct_val <= 8 else (AMBER if fees_pct_val <= 12 else RED)
+
+        # Waterfall: Sales - Payment - Fees = Outstanding (full width)
+        f1, op1, f2, op2, f3, op3, f4 = st.columns([3, 0.5, 3, 0.5, 3, 0.5, 3])
+        prev_sales = prev_row["Total Sales (RM)"] if prev_row is not None else None
+        prev_payment = prev_row["Total Payment (RM)"] if prev_row is not None else None
+        prev_fees = prev_row["Total Fees (RM)"] if prev_row is not None else None
+        prev_outstanding = prev_row["Total Outstanding (RM)"] if prev_row is not None else None
+
+        f1.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{TEAL};"></span>
+            <div><div class="metric-label">TOTAL SALES</div>
+            <div class="metric-value">RM {run_row['Total Sales (RM)']:,.2f}</div>
+            {_delta_html(run_row['Total Sales (RM)'], prev_sales, prefix='RM ')}
+            </div></div></div>""", unsafe_allow_html=True)
+        op1.markdown(f'<div style="display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;color:{TEXT_MUTED};padding-top:1rem;">\u2212</div>', unsafe_allow_html=True)
+        f2.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{PURPLE};"></span>
+            <div><div class="metric-label">TOTAL PAYMENT</div>
+            <div class="metric-value">RM {run_row['Total Payment (RM)']:,.2f}</div>
+            {_delta_html(run_row['Total Payment (RM)'], prev_payment, prefix='RM ')}
+            </div></div></div>""", unsafe_allow_html=True)
+        op2.markdown(f'<div style="display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;color:{TEXT_MUTED};padding-top:1rem;">\u2212</div>', unsafe_allow_html=True)
+        f3.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{AMBER};"></span>
+            <div><div class="metric-label">TOTAL FEES</div>
+            <div class="metric-value">RM {run_row['Total Fees (RM)']:,.2f}</div>
+            {_delta_html(run_row['Total Fees (RM)'], prev_fees, prefix='RM ', invert=True)}
+            </div></div></div>""", unsafe_allow_html=True)
+        op3.markdown(f'<div style="display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;color:{RED};padding-top:1rem;">\uff1d</div>', unsafe_allow_html=True)
+        outstanding_val = run_row['Total Outstanding (RM)']
+        outstanding_color = GREEN if outstanding_val == 0 else RED
+        f4.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{outstanding_color};"></span>
+            <div><div class="metric-label">OUTSTANDING</div>
+            <div class="metric-value" style="color:{outstanding_color};">RM {outstanding_val:,.2f}</div>
+            {_delta_html(outstanding_val, prev_outstanding, prefix='RM ', invert=True)}
+            </div></div></div>""", unsafe_allow_html=True)
+
+        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+
+        # Match Rate Gauge (below waterfall, centered in a narrower column)
+        gauge_spacer_l, gauge_center, gauge_spacer_r = st.columns([1, 2, 1])
+        with gauge_center:
+            fig_gauge = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=match_rate_val,
+                number=dict(suffix="%", font=dict(size=36)),
+                title=dict(text="Match Rate", font=dict(size=14)),
+                gauge=dict(
+                    axis=dict(range=[0, 100]),
+                    bar=dict(color=gauge_color),
+                    bgcolor="#F0F0F0",
+                    steps=[
+                        dict(range=[0, 92], color="#FDE8E8"),
+                        dict(range=[92, 95], color="#FEF3C7"),
+                        dict(range=[95, 100], color="#D1FAE5"),
+                    ],
+                ),
+            ))
+            fig_gauge.update_layout(
+                **_PLOTLY_LAYOUT, height=260,
+                margin=dict(l=30, r=30, t=60, b=10),
+            )
+            st.plotly_chart(fig_gauge, use_container_width=True, config={"displayModeBar": False})
+
+        # \u2500\u2500 SECTION 2: Fees & Trend Analysis \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{AMBER};"></span>Fee Analysis & Outstanding Trend</div>', unsafe_allow_html=True)
+
+        fee_col, trend_col = st.columns(2)
+
+        with fee_col:
+            # Fees % of Sales gauge
+            prev_fees_pct = None
+            if prev_row is not None and prev_row["Total Sales (RM)"] > 0:
+                prev_fees_pct = round(prev_row["Total Fees (RM)"] / prev_row["Total Sales (RM)"] * 100, 2)
+
+            fig_fee = go.Figure(go.Indicator(
+                mode="gauge+number+delta",
+                value=fees_pct_val,
+                number=dict(suffix="%", font=dict(size=34)),
+                title=dict(text="Fees % of Sales", font=dict(size=14)),
+                delta=dict(
+                    reference=prev_fees_pct if prev_fees_pct is not None else fees_pct_val,
+                    increasing=dict(color=RED),
+                    decreasing=dict(color=GREEN),
+                    suffix="%",
+                    font=dict(size=14),
+                ),
+                gauge=dict(
+                    axis=dict(range=[0, 20]),
+                    bar=dict(color=fees_color),
+                    bgcolor="#F0F0F0",
+                    steps=[
+                        dict(range=[0, 5], color="#D1FAE5"),
+                        dict(range=[5, 8], color="#E8FFE8"),
+                        dict(range=[8, 12], color="#FEF3C7"),
+                        dict(range=[12, 20], color="#FDE8E8"),
+                    ],
+                    threshold=dict(
+                        line=dict(color=RED, width=3),
+                        thickness=0.8,
+                        value=12,
+                    ),
+                ),
+            ))
+            fig_fee.update_layout(
+                **_PLOTLY_LAYOUT, height=300,
+                margin=dict(l=30, r=30, t=60, b=20),
+            )
+            st.plotly_chart(fig_fee, use_container_width=True, config={"displayModeBar": False})
+
+            # Fee context card
+            fee_status = "Within normal range" if fees_pct_val <= 8 else ("Above average — verify contract" if fees_pct_val <= 12 else "Exceeds threshold — investigate")
+            fee_icon = "✅" if fees_pct_val <= 8 else ("⚠️" if fees_pct_val <= 12 else "🚨")
+            st.markdown(f"""
+            <div style="background:{CARD_BG}; border:1px solid {BORDER}; border-radius:8px; padding:0.75rem 1rem; font-size:0.85rem;">
+                {fee_icon} <b>Fee Rate:</b> {fees_pct_val:.2f}% &nbsp;&nbsp;|&nbsp;&nbsp;
+                <b>Expected Shopee range:</b> 3-8% &nbsp;&nbsp;|&nbsp;&nbsp;
+                <b>Assessment:</b> {fee_status}
+            </div>
+            """, unsafe_allow_html=True)
+
+        with trend_col:
+            # Outstanding Amount Trend — last N runs
+            trend_runs = all_sorted[["Run Date", "Total Outstanding (RM)", "Outstanding Orders", "Run ID"]].copy()
+            trend_runs = trend_runs.tail(10)  # show up to last 10 runs
+
+            bar_colors = [GREEN if v == 0 else RED for v in trend_runs["Total Outstanding (RM)"]]
+            # Highlight current run
+            highlight = ["rgba(0,0,0,0.15)" if rid == selected_run_id else "rgba(0,0,0,0)" for rid in trend_runs["Run ID"]]
+
+            fig_trend_out = go.Figure()
+            fig_trend_out.add_trace(go.Bar(
+                x=trend_runs["Run Date"].astype(str),
+                y=trend_runs["Total Outstanding (RM)"],
+                marker=dict(color=bar_colors, cornerradius=4,
+                            line=dict(color=highlight, width=3)),
+                text=[f"RM {v:,.0f}" for v in trend_runs["Total Outstanding (RM)"]],
+                textposition="outside",
+                textfont=dict(size=10),
+                hovertemplate="<b>%{x}</b><br>Outstanding: RM %{y:,.2f}<extra></extra>",
+            ))
+            fig_trend_out.add_hline(y=0, line_color=GREEN, line_width=2)
+            fig_trend_out.update_layout(
+                **_PLOTLY_LAYOUT, height=300,
+                title=dict(text="Outstanding Amount (Last Runs)", font=dict(size=14)),
+                yaxis=dict(showgrid=True, gridcolor="#F0F0F0", title="Outstanding (RM)"),
+                xaxis=dict(showgrid=False, title="Run Date", tickangle=-45),
+                margin=dict(l=60, r=20, t=50, b=70),
+            )
+            st.plotly_chart(fig_trend_out, use_container_width=True, config={"displayModeBar": False})
+
+            # Trend assessment
+            if len(trend_runs) >= 2:
+                last_two = trend_runs["Total Outstanding (RM)"].tail(2).tolist()
+                if last_two[-1] == 0:
+                    st.success("✅ Outstanding is zero this run — fully reconciled.")
+                elif last_two[-1] < last_two[-2]:
+                    st.info(f"ℹ️ Outstanding decreased from RM {last_two[-2]:,.2f} to RM {last_two[-1]:,.2f} — improving.")
+                elif last_two[-1] > last_two[-2]:
+                    st.warning(f"⚠️ Outstanding increased from RM {last_two[-2]:,.2f} to RM {last_two[-1]:,.2f} — investigate.")
+                else:
+                    st.info(f"— Outstanding unchanged at RM {last_two[-1]:,.2f}.")
+
+        # ── SECTION 3: Exceptions & Data Quality ───────────────────
+        st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{RED};"></span>Exceptions & Data Quality</div>', unsafe_allow_html=True)
+
+        exc1, exc2, exc3, exc4 = st.columns(4)
+
+        prev_oo = prev_row["Outstanding Orders"] if prev_row is not None else None
+        prev_ref = prev_row["Refund Orders"] if prev_row is not None else None
+        prev_inb = prev_row["Income Not In Balance"] if prev_row is not None else None
+        prev_bni = prev_row["Balance Not In Income"] if prev_row is not None else None
+
+        exc1.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{RED if run_row['Outstanding Orders'] > 0 else GREEN};"></span>
+            <div><div class="metric-label">OUTSTANDING ORDERS</div>
+            <div class="metric-value">{run_row['Outstanding Orders']:,}</div>
+            {_delta_html(run_row['Outstanding Orders'], prev_oo, fmt=',', invert=True)}
+            </div></div></div>""", unsafe_allow_html=True)
+
+        exc2.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{PINK};"></span>
+            <div><div class="metric-label">REFUND ORDERS</div>
+            <div class="metric-value">{run_row['Refund Orders']:,}</div>
+            {_delta_html(run_row['Refund Orders'], prev_ref, fmt=',', invert=True)}
+            </div></div></div>""", unsafe_allow_html=True)
+
+        exc3.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{RED_DARK};"></span>
+            <div><div class="metric-label">INCOME NOT IN BALANCE</div>
+            <div class="metric-value">{run_row['Income Not In Balance']:,}</div>
+            {_delta_html(run_row['Income Not In Balance'], prev_inb, fmt=',', invert=True)}
+            </div></div></div>""", unsafe_allow_html=True)
+
+        exc4.markdown(f"""
+        <div class="metric-card">
+            <div style="display:flex; align-items:center;"><span class="metric-accent" style="background:{PURPLE_DARK};"></span>
+            <div><div class="metric-label">BALANCE NOT IN INCOME</div>
+            <div class="metric-value">{run_row['Balance Not In Income']:,}</div>
+            {_delta_html(run_row['Balance Not In Income'], prev_bni, fmt=',', invert=True)}
+            </div></div></div>""", unsafe_allow_html=True)
+
+        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+
+        # Collapsible: Raw data counts (less important, available on demand)
+        with st.expander("📋 Raw Data Counts (click to expand)"):
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            rc1.markdown(_metric_card("Income Rows", f"{run_row['Income Rows']:,}", PURPLE), unsafe_allow_html=True)
+            rc2.markdown(_metric_card("Balance Rows", f"{run_row['Balance Rows']:,}", TEAL), unsafe_allow_html=True)
+            rc3.markdown(_metric_card("Sales Rows", f"{run_row['Sales Rows']:,}", PINK), unsafe_allow_html=True)
+            rc4.markdown(_metric_card("Recon Rows", f"{run_row['Recon Rows']:,}", PURPLE_DARK), unsafe_allow_html=True)
+
+        # ── Data tables for live runs ───────────────────────────────
+        live_result = st.session_state.get("run_results", {}).get(selected_run_id)
+        if live_result is not None:
+            st.markdown(f'<div class="section-title"><span class="section-dot" style="background:{PINK};"></span>Reconciliation Data</div>', unsafe_allow_html=True)
+
+            live_stats = live_result["stats"]
+            tab_labels = [
+                f"Reconciliation  ({live_stats['recon_rows']:,})",
+                f"Outstanding  ({live_stats['outstanding_rows']:,})",
+                f"Refund  ({live_stats['refund_rows']:,})",
+                f"Income Not In Balance  ({live_stats['income_not_balance']:,})",
+                f"Balance Not In Income  ({live_stats['balance_not_income']:,})",
+            ]
+            tab_keys = ["ov_recon", "ov_out", "ov_refund", "ov_ib", "ov_bi"]
+            data_keys = ["recon_report", "outstanding", "refund", "income_not_balance", "balance_not_income"]
+
+            tabs = st.tabs(tab_labels)
+            for tab, dk, tk in zip(tabs, data_keys, tab_keys):
+                with tab:
+                    df_pl = live_result.get(dk)
+                    if df_pl is not None and not df_pl.is_empty():
+                        pdf = df_pl.to_pandas()
+                        st.markdown(f"""
+                        <div style="display:flex; align-items:center; gap:0.5rem; margin:0.5rem 0;">
+                            <span style="background:{TEAL}; color:white; padding:0.15rem 0.6rem; border-radius:12px; font-size:0.78rem; font-weight:600;">
+                                {len(pdf):,}
+                            </span>
+                            <span style="color:{TEXT_MUTED}; font-size:0.82rem;">rows</span>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.dataframe(pdf, use_container_width=True, height=420)
+                    else:
+                        st.info("No records to display.")
+
+    st.stop()
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Run pipeline when button clicked
 # ──────────────────────────────────────────────────────────────────────────────
@@ -518,6 +1173,62 @@ if run_btn and folder_exists and all_found:
         master_recon_path=str(master_recon_file) if master_recon_file else None,
     )
     st.session_state["result"] = result
+
+    # ── Save run summary to history for the Summary page ──────
+    s = result["stats"]
+    recon_pdf = result["recon_report"].to_pandas()
+    total_sales = recon_pdf["SalesCenterAmount"].sum() if "SalesCenterAmount" in recon_pdf.columns else 0
+    total_payment = recon_pdf["Payment Amount"].sum() if "Payment Amount" in recon_pdf.columns else 0
+    total_fees_val = sum(
+        recon_pdf[c].sum() if c in recon_pdf.columns else 0
+        for c in ["Commission Fee", "Transaction Fee", "Service Fee",
+                  "Actual Shipping Fee", "AMS Commission Fee", "Return QC Fee"]
+    )
+    total_outstanding_val = recon_pdf["Outstanding"].sum() if "Outstanding" in recon_pdf.columns else 0
+    recon_rows = s["recon_rows"]
+    outstanding_rows = s["outstanding_rows"]
+    match_rate = round((recon_rows - outstanding_rows) / recon_rows * 100, 2) if recon_rows else 0
+    run_id = hashlib.sha256(
+        f"live-{datetime.datetime.now().isoformat()}".encode()
+    ).hexdigest()[:8].upper()
+
+    # Flag for human review when outstanding is not zero
+    needs_review = outstanding_rows != 0 or total_outstanding_val != 0
+    review_reasons = []
+    if outstanding_rows != 0:
+        review_reasons.append(f"Outstanding orders ({outstanding_rows})")
+    if total_outstanding_val != 0:
+        review_reasons.append(f"Outstanding amount (RM {total_outstanding_val:,.2f})")
+
+    date_from = s.get("date_from", "N/A")
+    date_to = s.get("date_to", "N/A")
+    run_record = {
+        "Run ID": f"RUN-{run_id}",
+        "Run Date": datetime.date.today(),
+        "Period From": date_from,
+        "Period To": date_to,
+        "Income Rows": s["income_rows"],
+        "Balance Rows": s["balance_rows"],
+        "Sales Rows": s["sales_rows"],
+        "Recon Rows": recon_rows,
+        "Outstanding Orders": outstanding_rows,
+        "Refund Orders": s["refund_rows"],
+        "Match Rate (%)": match_rate,
+        "Total Sales (RM)": round(total_sales, 2),
+        "Total Payment (RM)": round(total_payment, 2),
+        "Total Fees (RM)": round(total_fees_val, 2),
+        "Total Outstanding (RM)": round(total_outstanding_val, 2),
+        "Income Not In Balance": s["income_not_balance"],
+        "Balance Not In Income": s["balance_not_income"],
+        "Duration (s)": round(result.get("total_elapsed", 0), 2),
+        "Fees % of Sales": round(total_fees_val / total_sales * 100, 2) if total_sales else 0,
+        "Needs Review": needs_review,
+        "Review Reasons": "; ".join(review_reasons) if review_reasons else "\u2014",
+        "Status": "\u26a0\ufe0f Needs Review" if needs_review else "\u2705 OK",
+        "Source": "Live",
+    }
+    st.session_state["run_history"].append(run_record)
+    st.session_state["run_results"][f"RUN-{run_id}"] = result
 
 
 # ──────────────────────────────────────────────────────────────────────────────

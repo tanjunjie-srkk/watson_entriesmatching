@@ -66,21 +66,25 @@ def _generate_mock_runs() -> pd.DataFrame:
         balance_rows = rng.randint(800, 5000)
         sales_rows = rng.randint(200, 1500)
         recon_rows = rng.randint(700, min(income_rows, balance_rows))
-        # Force some runs to have zero outstanding so they show as OK
-        if i % 3 == 0:  # roughly 1 in 3 runs have zero outstanding
+        # Every 5th run is fully reconciled (OK status, zero outstanding)
+        if i % 5 == 0:
             outstanding_rows = 0
-        else:
-            outstanding_rows = rng.randint(1, int(recon_rows * 0.15))
-        refund_rows = rng.randint(0, int(recon_rows * 0.08))
-        match_rate = round((recon_rows - outstanding_rows) / recon_rows * 100, 2) if recon_rows else 0
-        total_sales = round(rng.uniform(50_000, 500_000), 2)
-        total_fees = round(total_sales * rng.uniform(0.03, 0.12), 2)
-        if i % 3 == 0:
-            # OK case: payment covers sales minus fees exactly → zero outstanding
+            refund_rows = rng.randint(0, int(recon_rows * 0.08))
+            match_rate = 100.0
+            total_sales = round(rng.uniform(50_000, 500_000), 2)
+            total_fees = round(total_sales * rng.uniform(0.03, 0.12), 2)
             total_payment = round(total_sales - total_fees, 2)
             total_outstanding = 0.0
         else:
-            total_payment = round(total_sales * rng.uniform(0.85, 0.98), 2)
+            # Positive outstanding rows and amounts
+            outstanding_rows = rng.randint(1, max(2, int(recon_rows * 0.15)))
+            refund_rows = rng.randint(0, int(recon_rows * 0.08))
+            match_rate = round((recon_rows - outstanding_rows) / recon_rows * 100, 2) if recon_rows else 0
+            total_sales = round(rng.uniform(50_000, 500_000), 2)
+            total_fees = round(total_sales * rng.uniform(0.03, 0.12), 2)
+            # Compute payment so that outstanding = sales - payment - fees is always positive
+            max_payment = total_sales - total_fees
+            total_payment = round(max_payment * rng.uniform(0.85, 0.97), 2)
             total_outstanding = round(total_sales - total_payment - total_fees, 2)
         income_not_balance = rng.randint(0, 30)
         balance_not_income = rng.randint(0, 25)

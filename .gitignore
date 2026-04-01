@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 .venv*/
 *.egg-info/
+OneDrive_2026-03-09/**
+*.zip
 
 # OS
 .DS_Store

@@ -20,7 +20,16 @@ import plotly.graph_objects as go
 import streamlit as st
 
 # Ensure the project root is on sys.path so `reconciliation` package is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Default sample-data folder — resolves correctly locally and on Streamlit Cloud
+_DEFAULT_SCENARIO_DIR = str(
+    _PROJECT_ROOT
+    / "OneDrive_2026-03-09"
+    / "Shopee Sample Reports (Testing)"
+    / "scenario2"
+)
 
 from reconciliation import run_reconciliation_from_paths  # noqa: E402
 from reconciliation.excel_export import export_to_excel   # noqa: E402
@@ -584,7 +593,7 @@ if page == "📋 Reconciliation Run":
   with st.sidebar:
     folder_path = st.text_input(
         "Scenario Folder Path",
-        value=r"c:\Users\TanJunJie\OneDrive - SRKK Group\Project\watson_entriesmatching\OneDrive_2026-03-09\Shopee Sample Reports (Testing)\scenario2",
+        value=_DEFAULT_SCENARIO_DIR,
         help="Path to a scenario folder containing Income, Balance, and Sales Excel files.",
     )
     st.markdown("---")

@@ -5,6 +5,10 @@ __pycache__/
 .venv*/
 *.egg-info/
 OneDrive_2026-03-09/**
+# Allow the sample data that Streamlit Cloud needs
+!OneDrive_2026-03-09/
+!OneDrive_2026-03-09/Shopee Sample Reports (Testing)/
+!OneDrive_2026-03-09/Shopee Sample Reports (Testing)/**
 *.zip
 
 # OS

@@ -591,9 +591,17 @@ master_recon_file: Path | None = None
 
 if page == "📋 Reconciliation Run":
   with st.sidebar:
+    # If the session is carrying a stale/non-existent path (e.g. the old
+    # hard-coded Windows path from a previous deployment) but our bundled
+    # default does exist, silently reset the widget to the correct default.
+    _stored = st.session_state.get("scenario_folder_path", "")
+    if _stored and not Path(_stored).exists() and Path(_DEFAULT_SCENARIO_DIR).exists():
+        st.session_state["scenario_folder_path"] = _DEFAULT_SCENARIO_DIR
+
     folder_path = st.text_input(
         "Scenario Folder Path",
         value=_DEFAULT_SCENARIO_DIR,
+        key="scenario_folder_path",
         help="Path to a scenario folder containing Income, Balance, and Sales Excel files.",
     )
     st.markdown("---")
